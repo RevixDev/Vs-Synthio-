@@ -1,13 +1,13 @@
 package;
 
-import Management.MemoryManagement;
-import flixel.tweens.FlxTween;
+#if windows
+import Discord.DiscordClient;
+#end
+import flixel.util.FlxColor;
+import openfl.Lib;
 import Conductor.BPMChangeEvent;
 import flixel.FlxG;
-import flixel.addons.transition.FlxTransitionableState;
 import flixel.addons.ui.FlxUIState;
-import flixel.math.FlxRect;
-import flixel.util.FlxTimer;
 
 class MusicBeatState extends FlxUIState
 {
@@ -16,39 +16,110 @@ class MusicBeatState extends FlxUIState
 
 	private var curStep:Int = 0;
 	private var curBeat:Int = 0;
-	public var controls(get, never):Controls;
+	private var curDecimalBeat:Float = 0;
+	private var controls(get, never):Controls;
 
 	inline function get_controls():Controls
 		return PlayerSettings.player1.controls;
 
 	override function create()
 	{
+		TimingStruct.clearTimings();
+		(cast (Lib.current.getChildAt(0), Main)).setFPSCap(FlxG.save.data.fpsCap);
+
 		if (transIn != null)
 			trace('reg ' + transIn.region);
 
 		super.create();
 	}
 
+
+	var array:Array<FlxColor> = [
+		FlxColor.fromRGB(148, 0, 211),
+		FlxColor.fromRGB(75, 0, 130),
+		FlxColor.fromRGB(0, 0, 255),
+		FlxColor.fromRGB(0, 255, 0),
+		FlxColor.fromRGB(255, 255, 0),
+		FlxColor.fromRGB(255, 127, 0),
+		FlxColor.fromRGB(255, 0 , 0)
+	];
+
+	var skippedFrames = 0;
+
 	override function update(elapsed:Float)
 	{
 		//everyStep();
-		var oldStep:Int = curStep;
+		var nextStep:Int = updateCurStep();
 
-		updateCurStep();
-		updateBeat();
+		if (nextStep >= 0)
+		{
+			if (nextStep > curStep)
+			{
+				for (i in curStep...nextStep)
+				{
+					curStep++;
+					updateBeat();
+					stepHit();
+				}
+			}
+			else if (nextStep < curStep)
+			{
+				//Song reset?
+				curStep = nextStep;
+				updateBeat();
+				stepHit();
+			}
+		}
 
-		if (oldStep != curStep && curStep > 0)
-			stepHit();
+		if (Conductor.songPosition < 0)
+			curDecimalBeat = 0;
+		else
+		{
+			if (TimingStruct.AllTimings.length > 1)
+			{
+				var data = TimingStruct.getTimingAtTimestamp(Conductor.songPosition);
+
+				FlxG.watch.addQuick("Current Conductor Timing Seg", data.bpm);
+
+				Conductor.crochet = ((60 / data.bpm) * 1000);
+
+				var percent = (Conductor.songPosition - (data.startTime * 1000)) / (data.length * 1000);
+
+				curDecimalBeat = data.startBeat + (((Conductor.songPosition/1000) - data.startTime) * (data.bpm / 60));
+			}
+			else
+			{
+				curDecimalBeat = (Conductor.songPosition / 1000) * (Conductor.bpm/60);
+				Conductor.crochet = ((60 / Conductor.bpm) * 1000);
+			}
+		}
+
+		if (FlxG.save.data.fpsRain && skippedFrames >= 6)
+			{
+				if (currentColor >= array.length)
+					currentColor = 0;
+				(cast (Lib.current.getChildAt(0), Main)).changeFPSColor(array[currentColor]);
+				currentColor++;
+				skippedFrames = 0;
+			}
+			else
+				skippedFrames++;
+
+		if ((cast (Lib.current.getChildAt(0), Main)).getFPSCap != FlxG.save.data.fpsCap && FlxG.save.data.fpsCap <= 290)
+			(cast (Lib.current.getChildAt(0), Main)).setFPSCap(FlxG.save.data.fpsCap);
 
 		super.update(elapsed);
 	}
 
 	private function updateBeat():Void
 	{
+		lastBeat = curBeat;
 		curBeat = Math.floor(curStep / 4);
 	}
 
-	private function updateCurStep():Void
+	public static var currentColor = 0;
+
+	private function updateCurStep():Int
 	{
 		var lastChange:BPMChangeEvent = {
 			stepTime: 0,
@@ -61,7 +132,7 @@ class MusicBeatState extends FlxUIState
 				lastChange = Conductor.bpmChangeMap[i];
 		}
 
-		curStep = lastChange.stepTime + Math.floor((Conductor.songPosition - lastChange.songTime) / Conductor.stepCrochet);
+		return lastChange.stepTime + Math.floor((Conductor.songPosition - lastChange.songTime) / Conductor.stepCrochet);
 	}
 
 	public function stepHit():Void
@@ -74,9 +145,13 @@ class MusicBeatState extends FlxUIState
 	{
 		//do literally nothing dumbass
 	}
-
-	override function destroy() {
-		// Clear Memory jackass
-		MemoryManagement.clear();
+	
+	public function fancyOpenURL(schmancy:String)
+	{
+		#if linux
+		Sys.command('/usr/bin/xdg-open', [schmancy, "&"]);
+		#else
+		FlxG.openURL(schmancy);
+		#end
 	}
 }
